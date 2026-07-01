@@ -10,6 +10,7 @@ const FUEL_LABEL = { super95: 'Super 95', diesel: 'Diesel', gas: 'Erdgas' };
 const FUEL_COLOR = { super95: '#34d399', diesel: '#fbbf24', gas: '#fb923c' };
 const DAYS_DE = ['SO','MO','DI','MI','DO','FR','SA'];
 const DAYS_FULL = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+const DAYS_MAP  = { SO:'Sonntag', MO:'Montag', DI:'Dienstag', MI:'Mittwoch', DO:'Donnerstag', FR:'Freitag', SA:'Samstag', FE:'Feiertag' };
 
 /* ── State ───────────────────────────────────────────────── */
 let map, userMarker, radiusCircle;
@@ -74,8 +75,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMap();
   initControls();
   restorePrefs();
+  updateHudOffset();
+  window.addEventListener('resize', updateHudOffset);
   checkOnboarding();
 });
+
+function updateHudOffset() {
+  const hud = document.querySelector('.top-hud');
+  if (!hud) return;
+  const h = hud.getBoundingClientRect().height;
+  document.documentElement.style.setProperty('--hud-h', Math.round(h) + 'px');
+}
 
 function showLoadOverlay() {
   const ov = document.createElement('div');
@@ -374,12 +384,22 @@ function renderList(list) {
 function openSheet(s) {
   sheetBody.innerHTML = buildSheetHTML(s);
   sheet.classList.add('open');
-  document.body.style.overflow = 'hidden';
+  if (window.innerWidth < 768) document.body.style.overflow = 'hidden';
+  // Desktop: map shrinks to make room for sheet panel
+  if (window.innerWidth >= 768) {
+    const w = sheet.getBoundingClientRect().width || 420;
+    document.getElementById('map').style.right = w + 'px';
+    setTimeout(() => map.invalidateSize(), 350);
+  }
 }
 
 function closeSheet() {
   sheet.classList.remove('open');
   document.body.style.overflow = '';
+  if (window.innerWidth >= 768) {
+    document.getElementById('map').style.right = '';
+    setTimeout(() => map.invalidateSize(), 350);
+  }
 }
 
 function buildSheetHTML(s) {
@@ -407,13 +427,14 @@ function buildSheetHTML(s) {
 
   const todayIdx = new Date().getDay();
   const hoursHTML = s.openingHours?.length
-    ? s.openingHours.map((oh, i) => {
+    ? s.openingHours.map((oh) => {
         const dayIdx = DAYS_DE.indexOf(oh.day);
         const isToday = dayIdx === todayIdx;
+        const dayName = DAYS_MAP[oh.day] ?? oh.day;
         const is24 = oh.from === '00:00' && (oh.to === '24:00' || oh.to === '00:00');
         const closed = oh.from == null || oh.from === oh.to;
         return `<div class="sh-day-row${isToday ? ' today' : ''}">
-          <span class="sh-day-name">${DAYS_FULL[dayIdx] ?? oh.day}${isToday ? ' (heute)' : ''}</span>
+          <span class="sh-day-name">${dayName}${isToday ? ' (heute)' : ''}</span>
           <span class="sh-day-hours${is24 ? ' open24' : ''}${closed ? ' closed' : ''}">
             ${is24 ? '24h' : closed ? 'Geschlossen' : `${oh.from} – ${oh.to}`}
           </span>
@@ -597,18 +618,26 @@ function locateMe() {
   navigator.geolocation.getCurrentPosition(
     pos => {
       locateBtn.classList.remove('spinning');
+      const acc = pos.coords.accuracy;
+      // Genauigkeit >2km = IP-basiert (kein echtes GPS), z.B. am PC
+      if (acc > 2000) {
+        showToast(`⚠️ Ungenaue Position (±${Math.round(acc/1000)}km) – kein GPS am PC verfügbar`, 4000);
+        return; // nicht verwenden, Heimatort bleibt aktiv
+      }
       userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       placeUserMarker(userPos.lat, userPos.lng);
       center = { ...userPos };
-      map.setView([userPos.lat, userPos.lng], 13, { animate: true });
-      refresh(false);
-      showToast('Standort gefunden ✓');
+      map.setView([userPos.lat, userPos.lng], 14, { animate: true });
+      stations = stations.map(s => ({ ...s, dist: distKm(userPos, s) }));
+      renderAll();
+      showToast(`GPS: ±${Math.round(acc)}m genau ✓`);
     },
-    () => {
+    err => {
       locateBtn.classList.remove('spinning');
-      showToast('GPS-Zugriff verweigert');
+      if (err.code === 1) showToast('GPS-Zugriff verweigert – in Einstellungen erlauben');
+      else showToast('GPS nicht verfügbar');
     },
-    { timeout: 8000, maximumAge: 30000 }
+    { timeout: 10000, maximumAge: 30000, enableHighAccuracy: true }
   );
 }
 
@@ -636,14 +665,8 @@ function restorePrefs() {
 async function startApp() {
   map.setView([center.lat, center.lng], 12);
   await refresh(false);
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(pos => {
-      userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      placeUserMarker(userPos.lat, userPos.lng);
-      stations = stations.map(s => ({ ...s, dist: distKm(userPos, s) }));
-      renderAll();
-    }, () => {}, { timeout: 6000, maximumAge: 60000 });
-  }
+  // Kein auto-GPS beim Start — verhindert IP-basierte Falschortung am PC.
+  // User nutzt explizit den Locate-Button für GPS.
 }
 
 /* ═══════════════════════════════════════════════════════════

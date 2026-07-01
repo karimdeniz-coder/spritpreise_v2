@@ -118,9 +118,35 @@ async function getStations({lat=TELFS_LAT,lng=TELFS_LNG,radiusKm=30}={}) {
     }
   });
 
+  // Targeted follow-up: stations with at least one price but missing others
+  const incomplete = Array.from(byId.values()).filter(s =>
+    Object.values(s.prices).some(v => v != null) &&
+    FUEL_TYPES.some(ft => s.prices[FUEL_KEY[ft]] == null)
+  );
+  if (incomplete.length > 0) {
+    const tTasks = incomplete.flatMap(s =>
+      FUEL_TYPES
+        .filter(ft => s.prices[FUEL_KEY[ft]] == null)
+        .map(ft => ({ id: s.id, lat: s.lat, lng: s.lng, ft }))
+    ).slice(0, 80);
+    const tResults = await Promise.allSettled(
+      tTasks.map(({ lat, lng, ft }) => fetchFuelType(lat, lng, ft))
+    );
+    tTasks.forEach(({ id, ft }, i) => {
+      const res = tResults[i];
+      if (res.status !== 'fulfilled') return;
+      const pk = FUEL_KEY[ft];
+      const match = (res.value || []).find(d => String(d.id) === id);
+      const price = match?.prices?.[0]?.amount ?? null;
+      if (price != null && byId.has(id)) byId.get(id).prices[pk] = price;
+    });
+    console.log(`[API] +${tTasks.length} targeted fills für ${incomplete.length} Stationen`);
+  }
+
   const stations=Array.from(byId.values());
   _cache.set(key,{data:stations,t:Date.now()});
-  console.log(`[API] ${stations.length} Stationen | ${pts.length} Tiles | ${radiusKm}km | ${stations.filter(s=>s.open).length} offen`);
+  const filled=stations.filter(s=>Object.values(s.prices).some(v=>v!=null)).length;
+  console.log(`[API] ${stations.length} Stationen | ${pts.length} Tiles | ${radiusKm}km | ${stations.filter(s=>s.open).length} offen | ${filled} mit Preisen`);
   return {stations,cached:false};
 }
 

@@ -21,8 +21,9 @@
   --radius:    16px;
   --radius-lg: 22px;
   --blur:      20px;
-  --hud-h:     112px;
+  --hud-h:     100px;
   --drawer-peek: 220px;
+  --sidebar-w: 360px;
   --trans:     0.28s cubic-bezier(.4,0,.2,1);
 }
 
@@ -757,17 +758,101 @@ html, body {
 }
 
 /* ══════════════════════════════════════════════════════════
-   RESPONSIVE
+   MOBILE TOUCH IMPROVEMENTS
 ══════════════════════════════════════════════════════════ */
-@media (min-width: 600px) {
-  .top-hud { max-width: 480px; }
-  .drawer  { max-width: 480px; left: 50%; transform: translate(-50%, calc(100% - var(--drawer-peek))); }
-  .drawer.open { transform: translate(-50%, 0); }
-  .fab { right: calc(50% - 240px + 14px); }
-  .refresh-chip { right: calc(50% - 240px + 70px); }
-  .sheet { max-width: 480px; left: 50%; transform: translate(-50%, 100%); }
-  .sheet.open { transform: translate(-50%, 0); }
-  .leaflet-control-zoom { margin-right: calc(50% - 240px + 12px) !important; }
+@media (max-width: 767px) {
+  .hud-btn { width: 40px; height: 40px; }
+  .fuel-btn { padding: 8px 14px; font-size: 13px; }
+  .station-card { padding: 13px 13px; }
+  .sc-name { font-size: 14px; }
+  .sc-price { font-size: 16px; }
+  .ctrl-select select { padding: 11px 0; font-size: 13px; }
+  #radiusSlider::-webkit-slider-thumb { width: 22px; height: 22px; }
+  .sh-nav-btn { padding: 14px 12px; }
+  .ob-card { padding: 36px 24px 28px; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   DESKTOP SIDEBAR LAYOUT (≥768px)
+══════════════════════════════════════════════════════════ */
+@media (min-width: 768px) {
+  /* ── Top HUD → sidebar header ── */
+  .top-hud {
+    max-width: var(--sidebar-w);
+    left: 0; right: auto;
+    padding: 0;
+  }
+  .topbar {
+    border-radius: 0;
+    border-left: none; border-right: none; border-top: none;
+    border-bottom: 1px solid var(--border);
+    padding: 14px 18px;
+  }
+  .searchbox {
+    border-radius: 0;
+    border-left: none; border-right: none;
+    padding: 0 18px;
+  }
+  .search-dropdown {
+    border-radius: 0 0 var(--radius) var(--radius);
+  }
+
+  /* ── Map → offset by sidebar ── */
+  #map { left: var(--sidebar-w); }
+
+  /* ── Drawer → fixed left sidebar ── */
+  .drawer {
+    width: var(--sidebar-w);
+    left: 0; right: auto;
+    top: 0; bottom: 0;
+    height: 100%;
+    transform: none !important;
+    border-radius: 0;
+    border-top: none;
+    border-right: 1px solid var(--border2);
+    padding-top: var(--hud-h, 100px);
+    background: rgba(6,11,20,.96);
+  }
+
+  /* ── Hide mobile-only UI ── */
+  .drawer-handle { display: none; }
+  .fab { display: none; }
+
+  /* ── Reposition helpers ── */
+  .refresh-chip {
+    bottom: 16px;
+    right: 16px;
+    left: auto;
+  }
+  .leaflet-control-zoom {
+    margin-bottom: 20px !important;
+    margin-right: 20px !important;
+  }
+
+  /* ── Station list: always scrollable ── */
+  .station-list { padding-bottom: 32px; }
+
+  /* ── Sheet → right-side panel ── */
+  .sheet {
+    left: auto;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: min(420px, 38vw);
+    height: 100%;
+    transform: translateX(100%);
+    border-radius: 0;
+    border-left: 1px solid var(--border2);
+  }
+  .sheet.open { transform: translateX(0); }
+
+  /* ── Widen price cards for desktop ── */
+  .sh-prices-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .sh-pval { font-size: 22px; }
+
+  /* ── Bigger station cards on desktop ── */
+  .station-card { padding: 12px 14px; }
+  .sc-name { font-size: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
