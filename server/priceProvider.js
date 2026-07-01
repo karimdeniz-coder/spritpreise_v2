@@ -3,151 +3,128 @@ const fetch = require('node-fetch');
 const TELFS_LAT = 47.3008;
 const TELFS_LNG = 11.0667;
 const FUEL_TYPES = ['DIE', 'SUP', 'GAS'];
-const FUEL_KEY_MAP = { DIE: 'diesel', SUP: 'super95', GAS: 'gas' };
+const FUEL_KEY  = { DIE:'diesel', SUP:'super95', GAS:'gas' };
 
-const BRAND_COLORS = {
-  'OMV':       { bg: '#1c4f9c', text: '#fff' },
-  'Shell':     { bg: '#f5c500', text: '#cc0000' },
-  'JET':       { bg: '#e2001a', text: '#fff' },
-  'Eni':       { bg: '#ffcc00', text: '#1a1a1a' },
-  'ENI':       { bg: '#ffcc00', text: '#1a1a1a' },
-  'Agip':      { bg: '#ffcc00', text: '#1a1a1a' },
-  'AVANTI':    { bg: '#00843d', text: '#fff' },
-  'Avanti':    { bg: '#00843d', text: '#fff' },
-  'Turmöl':    { bg: '#c8102e', text: '#fff' },
-  'BP':        { bg: '#009639', text: '#fff' },
-  'Esso':      { bg: '#003087', text: '#fff' },
-  'DISK':      { bg: '#e63946', text: '#fff' },
-  'Lagerhaus': { bg: '#4a7c59', text: '#fff' },
-  'WT':        { bg: '#334155', text: '#fff' },
-  'Waldhart':  { bg: '#7c3aed', text: '#fff' },
+const BRAND_STYLE = {
+  'OMV':       { bg:'#1c4f9c', text:'#fff' },
+  'Shell':     { bg:'#dd1d1d', text:'#f5c500' },
+  'JET':       { bg:'#e2001a', text:'#fff' },
+  'Eni':       { bg:'#1a1a1a', text:'#ffcc00' },
+  'ENI':       { bg:'#1a1a1a', text:'#ffcc00' },
+  'Agip':      { bg:'#1a1a1a', text:'#ffcc00' },
+  'AVANTI':    { bg:'#007a3d', text:'#fff' },
+  'Avanti':    { bg:'#007a3d', text:'#fff' },
+  'Turmöl':    { bg:'#c8102e', text:'#fff' },
+  'BP':        { bg:'#006a00', text:'#ffdf00' },
+  'Esso':      { bg:'#003087', text:'#fff' },
+  'DISK':      { bg:'#c0392b', text:'#fff' },
+  'Lagerhaus': { bg:'#3a6b47', text:'#fff' },
+  'WT':        { bg:'#2d3748', text:'#fff' },
+  'Waldhart':  { bg:'#553c9a', text:'#fff' },
+  'Petrol':    { bg:'#e67e22', text:'#fff' },
 };
 
-function brandStyle(name) {
-  if (!name) return { bg: '#334155', text: '#fff' };
-  for (const [k, v] of Object.entries(BRAND_COLORS)) {
+function brandStyle(name='') {
+  for (const [k,v] of Object.entries(BRAND_STYLE))
     if (name.toLowerCase().includes(k.toLowerCase())) return v;
-  }
-  return { bg: '#334155', text: '#fff' };
+  return { bg:'#2d3748', text:'#fff' };
 }
 
-let cache = null, cacheKey = '', cacheTime = 0;
-const CACHE_TTL = 5 * 60 * 1000;
+// Cache: 5 min
+const CACHE_TTL = 5*60*1000;
+const _cache = new Map();
 
-async function fetchFuelType(lat, lng, fuelType) {
-  const url = `https://www.spritpreisrechner.at/api/search/gas-stations/by-address` +
-    `?latitude=${lat}&longitude=${lng}&fuelType=${fuelType}&includeClosed=true`;
+async function fetchFuelType(lat, lng, ft) {
+  const url = `https://www.spritpreisrechner.at/api/search/gas-stations/by-address`+
+    `?latitude=${lat}&longitude=${lng}&fuelType=${ft}&includeClosed=true`;
   const res = await fetch(url, {
-    headers: { 'Accept': 'application/json', 'Referer': 'https://www.spritpreisrechner.at/', 'User-Agent': 'Mozilla/5.0' },
-    timeout: 10000,
+    headers:{'Accept':'application/json','Referer':'https://www.spritpreisrechner.at/','User-Agent':'Mozilla/5.0'},
+    timeout:10000,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-function distanceKm(a, b) {
-  const R = 6371, r = d => d * Math.PI / 180;
-  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
-  const h = Math.sin(dLat/2)**2 + Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(h));
+function distKm(a, b) {
+  const R=6371, r=d=>d*Math.PI/180;
+  const dLa=r(b.lat-a.lat), dLo=r(b.lng-a.lng);
+  const h=Math.sin(dLa/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
 }
 
-// Tiling: hexagonales Gitter für gleichmäßige Abdeckung
-function getTilePoints(lat, lng, radiusKm) {
-  const pts = [{ lat, lng }];
-  const latOff = d => d / 111;
-  const lngOff = d => d / (111 * Math.cos(lat * Math.PI / 180));
-
-  if (radiusKm <= 10) return pts;
-
-  // Ring 1: 6 Punkte im Inneren (Abstand ~40% des Radius)
-  const r1 = radiusKm * 0.42;
-  for (let i = 0; i < 6; i++) {
-    const a = (i * 60) * Math.PI / 180;
-    pts.push({ lat: lat + latOff(r1 * Math.sin(a)), lng: lng + lngOff(r1 * Math.cos(a)) });
+// Hexagonales Tiling für flächendeckende Abfrage
+function tilePoints(lat, lng, radiusKm) {
+  const pts=[{lat,lng}];
+  const La=d=>d/111;
+  const Lo=d=>d/(111*Math.cos(lat*Math.PI/180));
+  const rings = radiusKm<=10 ? [] : radiusKm<=25 ? [[0.4,6]] : radiusKm<=45 ? [[0.38,6],[0.78,12]] : [[0.35,6],[0.68,12],[0.92,18]];
+  for (const [frac,n] of rings) {
+    const r=radiusKm*frac;
+    for (let i=0;i<n;i++) {
+      const a=(i/n)*2*Math.PI;
+      pts.push({lat:lat+La(r*Math.sin(a)),lng:lng+Lo(r*Math.cos(a))});
+    }
   }
-
-  if (radiusKm <= 25) return pts;
-
-  // Ring 2: 12 Punkte am Rand (Abstand ~80% des Radius)
-  const r2 = radiusKm * 0.80;
-  for (let i = 0; i < 12; i++) {
-    const a = (i * 30) * Math.PI / 180;
-    pts.push({ lat: lat + latOff(r2 * Math.sin(a)), lng: lng + lngOff(r2 * Math.cos(a)) });
-  }
-
   return pts;
 }
 
-function todayHours(openingHours) {
+function formatToday(openingHours) {
   if (!openingHours?.length) return null;
-  const days = ['SO','MO','DI','MI','DO','FR','SA'];
-  const today = days[new Date().getDay()];
-  return openingHours.find(h => h.day === today) || null;
-}
-
-function formatHours(oh) {
+  const days=['SO','MO','DI','MI','DO','FR','SA'];
+  const oh=openingHours.find(h=>h.day===days[new Date().getDay()]);
   if (!oh) return null;
-  if (oh.from === '00:00' && (oh.to === '24:00' || oh.to === '00:00')) return '24h';
+  if (oh.from==='00:00'&&(oh.to==='24:00'||oh.to==='00:00')) return '24h geöffnet';
   return `${oh.from}–${oh.to}`;
 }
 
-async function getStations({ lat = TELFS_LAT, lng = TELFS_LNG, radiusKm = 30 } = {}) {
-  const key = `${lat.toFixed(3)}_${lng.toFixed(3)}_${radiusKm}`;
-  if (cache && cacheKey === key && Date.now() - cacheTime < CACHE_TTL) {
-    return { stations: cache, cached: true };
-  }
+async function getStations({lat=TELFS_LAT,lng=TELFS_LNG,radiusKm=30}={}) {
+  const key=`${lat.toFixed(3)}_${lng.toFixed(3)}_${radiusKm}`;
+  const now=Date.now();
+  const cached=_cache.get(key);
+  if (cached&&now-cached.t<CACHE_TTL) return {stations:cached.data,cached:true,age:Math.round((now-cached.t)/1000)};
 
-  const tilePoints = getTilePoints(lat, lng, radiusKm);
-  const center = { lat, lng };
-  const byId = new Map();
+  const pts=tilePoints(lat,lng,radiusKm);
+  const tasks=pts.flatMap(p=>FUEL_TYPES.map(ft=>({p,ft})));
+  const results=await Promise.allSettled(tasks.map(({p,ft})=>fetchFuelType(p.lat,p.lng,ft)));
 
-  // Alle Fuel-Typen × alle Tile-Punkte parallel
-  const tasks = [];
-  for (const pt of tilePoints) {
-    for (const ft of FUEL_TYPES) {
-      tasks.push({ pt, ft });
-    }
-  }
+  const center={lat,lng};
+  const byId=new Map();
 
-  const results = await Promise.allSettled(tasks.map(t => fetchFuelType(t.pt.lat, t.pt.lng, t.ft)));
-
-  tasks.forEach(({ ft }, i) => {
-    const result = results[i];
-    if (result.status !== 'fulfilled') return;
-    const priceKey = FUEL_KEY_MAP[ft];
-
-    for (const s of result.value || []) {
-      const sLat = s.location?.latitude, sLng = s.location?.longitude;
-      if (!sLat || !sLng) continue;
-      const dist = distanceKm(center, { lat: sLat, lng: sLng });
-      if (dist > radiusKm) continue;
-
-      const id = String(s.id);
+  tasks.forEach(({ft},i)=>{
+    const res=results[i];
+    if (res.status!=='fulfilled') return;
+    const pk=FUEL_KEY[ft];
+    for (const s of res.value||[]) {
+      const sLat=s.location?.latitude, sLng=s.location?.longitude;
+      if (!sLat||!sLng) continue;
+      if (distKm(center,{lat:sLat,lng:sLng})>radiusKm) continue;
+      const id=String(s.id);
       if (!byId.has(id)) {
-        const style = brandStyle(s.spritName || s.name);
-        const todayOh = todayHours(s.openingHours);
-        byId.set(id, {
-          id, name: s.name, brand: s.spritName || s.name,
-          lat: sLat, lng: sLng,
-          address: [s.location?.address, s.location?.postalCode, s.location?.city].filter(Boolean).join(', '),
-          brandBg: style.bg, brandText: style.text,
-          prices: { diesel: null, super95: null, gas: null },
-          open: s.open ?? true,
-          todayHours: formatHours(todayOh),
-          openingHours: s.openingHours || [],
-          updatedAt: new Date().toISOString(),
+        const st=brandStyle(s.spritName||s.name);
+        byId.set(id,{
+          id, name:s.name, brand:s.spritName||s.name,
+          lat:sLat, lng:sLng,
+          address:[s.location?.address,s.location?.postalCode,s.location?.city].filter(Boolean).join(', '),
+          brandBg:st.bg, brandText:st.text,
+          prices:{diesel:null,super95:null,gas:null},
+          open:s.open??true,
+          todayHours:formatToday(s.openingHours),
+          openingHours:s.openingHours||[],
+          reportedAt:new Date().toISOString(),
         });
       }
-      const price = s.prices?.[0]?.amount ?? null;
-      if (price != null) byId.get(id).prices[priceKey] = price;
+      const price=s.prices?.[0]?.amount??null;
+      if (price!=null) byId.get(id).prices[pk]=price;
     }
   });
 
-  const stations = Array.from(byId.values());
-  cache = stations; cacheKey = key; cacheTime = Date.now();
-  console.log(`[API] ${stations.length} Stationen | ${tilePoints.length} Tile-Punkte | Radius ${radiusKm}km | ${stations.filter(s=>s.open).length} offen`);
-  return { stations, cached: false };
+  const stations=Array.from(byId.values());
+  _cache.set(key,{data:stations,t:Date.now()});
+  console.log(`[API] ${stations.length} Stationen | ${pts.length} Tiles | ${radiusKm}km | ${stations.filter(s=>s.open).length} offen`);
+  return {stations,cached:false};
 }
 
-module.exports = { getStations, TELFS_LAT, TELFS_LNG };
+// Cache invalidieren (für Force-Refresh)
+function clearCache() { _cache.clear(); }
+
+module.exports={getStations,clearCache,TELFS_LAT,TELFS_LNG};
